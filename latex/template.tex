@@ -1,0 +1,36 @@
+\documentclass[sigconf,natbib=false,nonacm]{acmart}
+\RequirePackage[datamodel=acmdatamodel,  style=acmnumeric,]{biblatex}
+
+\addbibresource{refs.bib}
+
+\begin{document}
+
+\title[Fragility of Absence]{The Fragility of Absence Evaluation Under Pruning}
+
+\author{Hamidreza Bolouri Kashani}
+\affiliation{%
+  \institution{Amirkabir University of Technology}
+  \city{Iran}
+  \country{Tehran}}
+\email{hamidb@aut.ac.ir}
+
+
+\begin{abstract}
+The "What is Missing?" paper demonstrated that neural networks encode not only the presence of features but also their absence \rl{—} a phenomenon measured by the suppression of neuron activations when presented with least-activating patches. But is this "encoded absence" a fundamental property of neural representations, or could it be a statistical artifact? We stress-test the network across multiple pruning methods and sparsity levels. Our results reveal that the difference between maximum and minimum activation and random activation metric can produce compelling results even when the network is literally non-functional. We argue that the metrics must be evaluated with appropriate baselines, so we don't mistake statistical artifacts for genuine meaning.
+\end{abstract}
+
+\keywords{AI interpretability, XAI, evaluation, missing features, computer vision}
+
+\maketitle
+
+\renewcommand{\shortauthors}{ }
+\settopmatter{printacmref=false}
+
+\input{content}
+
+\printbibliography
+
+\end{document}
+\endinput
+%%
+
