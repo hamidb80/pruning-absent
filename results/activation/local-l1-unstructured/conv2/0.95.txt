@@ -1,0 +1,36 @@
+Arguments:
+  --data_dir: /kaggle/input/datasets/sautkin/imagenet1kvalid/
+  --model: resnet50
+  --model_layer: model.layer4[2].conv3
+  --batch_size: 256
+  --seed: 0
+  --nr_images_per_channel: 100
+  --patch_size: 64
+  --patch_stride: 16
+  --nr_patches: 8
+  --sparsity: 0.95
+  --data_ratio: 0.25
+Downloading: "https://download.pytorch.org/models/resnet50-11ad3fa6.pth" to /root/.cache/torch/hub/checkpoints/resnet50-11ad3fa6.pth
+100%|██████████| 97.8M/97.8M [00:00<00:00, 192MB/s]
+CUDA
+Load
+Dataset
+Subset
+Loader
+Start
+100%|██████████| 49/49 [00:48<00:00,  1.00it/s]
+Top activating images (mean): tensor(-17.5156, dtype=torch.float16)
+Top activating images (std): tensor(0.2162, dtype=torch.float16)
+Activations for random images (mean): tensor(-18.9219, dtype=torch.float16)
+Activations for random images (std): tensor(0.4910, dtype=torch.float16)
+Finding patches (cnn)...
+100%|██████████| 12500/12500 [21:20<00:00,  9.76it/s]
+100%|██████████| 2048/2048 [56:35<00:00,  1.66s/it]
+Activations for top images with bottom patches (mean): tensor(-17.7969, dtype=torch.float16)
+Activations for top images with bottom patches (std): tensor(0.2153, dtype=torch.float16)
+Activations for top images with top patches (mean): tensor(-17.4531, dtype=torch.float16)
+Activations for top images with top patches (std): tensor(0.2131, dtype=torch.float16)
+Activations for top images with random patches (mean): tensor(-17.6094, dtype=torch.float16)
+Activations for top images with random patches (std): tensor(0.2104, dtype=torch.float16)
+Number channels with significant change: 1396
+Number channels without significant change: 652

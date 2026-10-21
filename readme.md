@@ -1,0 +1,3 @@
+- `results/`: result of experiments
+- `scripts/`: small scripts that work on data at `results/`
+- `notebook.ipynb`: the code that produced the results

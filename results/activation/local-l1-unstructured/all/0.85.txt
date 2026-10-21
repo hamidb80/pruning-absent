@@ -1,0 +1,40 @@
+Arguments:
+  --data_dir: /kaggle/input/datasets/sautkin/imagenet1kvalid/
+  --model: resnet50
+  --model_layer: model.layer4[2].conv3
+  --batch_size: 256
+  --seed: 0
+  --nr_images_per_channel: 100
+  --patch_size: 64
+  --patch_stride: 16
+  --nr_patches: 8
+  --sparsity: 0.85
+  --data_ratio: 0.25
+  --prune_method: local-unstructured-L1
+Downloading: "https://download.pytorch.org/models/resnet50-11ad3fa6.pth" to /root/.cache/torch/hub/checkpoints/resnet50-11ad3fa6.pth
+100%|██████████| 97.8M/97.8M [00:00<00:00, 192MB/s]
+CUDA
+Load
+Dataset
+Subset
+Loader
+>> local-unstructured-L1 0.85
+Start
+100%|██████████| 49/49 [00:44<00:00,  1.10it/s]
+Top activating images (mean): tensor(-0.2766, dtype=torch.float16)
+Top activating images (std): tensor(0.0014, dtype=torch.float16)
+Activations for random images (mean): tensor(-0.2869, dtype=torch.float16)
+Activations for random images (std): tensor(0.0020, dtype=torch.float16)
+Finding patches (cnn)...
+100%|██████████| 12500/12500 [20:05<00:00, 10.37it/s]
+  0%|          | 6/2048 [00:08<49:45,  1.46s/it]/usr/local/lib/python3.12/dist-packages/scipy/stats/_axis_nan_policy.py:579: RuntimeWarning: Precision loss occurred in moment calculation due to catastrophic cancellation. This occurs when the data are nearly identical. Results may be unreliable.
+  res = hypotest_fun_out(*samples, **kwds)
+100%|██████████| 2048/2048 [49:41<00:00,  1.46s/it]
+Activations for top images with bottom patches (mean): tensor(-0.2781, dtype=torch.float16)
+Activations for top images with bottom patches (std): tensor(0.0016, dtype=torch.float16)
+Activations for top images with top patches (mean): tensor(-0.2764, dtype=torch.float16)
+Activations for top images with top patches (std): tensor(0.0014, dtype=torch.float16)
+Activations for top images with random patches (mean): tensor(-0.2776, dtype=torch.float16)
+Activations for top images with random patches (std): tensor(0.0015, dtype=torch.float16)
+Number channels with significant change: 1307
+Number channels without significant change: 741
