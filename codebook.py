@@ -20,8 +20,9 @@ from scipy.stats import ttest_ind
 
 # constants -------------------------
 
-WEIGHT = 'weight'
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+CPU = 'cpu'
+CUDA = 'cuda'
+DEVICE = torch.device(CUDA if torch.cuda.is_available() else CPU)
 
 # classes -------------------------
 
@@ -143,8 +144,10 @@ def get_lowest_highest_patches(
         assert batch_size == 1 and channels == 3, f"Expected [1,3,H,W], got {images.shape}"
 
         if architecture == "cnn":
+            ### crop images to patches
             patches = images.unfold(1, 3, 1).unfold(2, patch_size, stride).unfold(3, patch_size, stride)
             patches = patches.contiguous().view(-1, 3, patch_size, patch_size)
+
             outputs = model(patches)
 
             if outputs.dim() != 2 or outputs.shape[1] != output_size: #. outputs !~ (_ , output_size)
@@ -276,10 +279,8 @@ def get_lowest_highest_patches(
         iteration += 1
         all_labels.append(labels[0])
 
-    if return_images:
-        return bottom_patches, bottom_patches_scores, lowest_images, top_patches, top_patches_scores, highest_images
-    else:
-        return bottom_patches, bottom_patches_scores, None, top_patches, top_patches_scores, None
+    if return_images: return bottom_patches, bottom_patches_scores, lowest_images, top_patches, top_patches_scores, highest_images
+    else: return bottom_patches, bottom_patches_scores, None, top_patches, top_patches_scores, None
 
 def paste_patches(images, patches):
     B, C, H, W = images.shape
@@ -351,7 +352,7 @@ def get_prunable_modules(model, exclude_types=None):
         
         # Check if module has a weight parameter
         if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-            parameters_to_prune.append((module, WEIGHT))
+            parameters_to_prune.append((module, 'weight'))
     
     return parameters_to_prune
 
@@ -361,7 +362,7 @@ def get_sparsity(model):
     zero_params = 0
     
     for name, param in model.named_parameters():
-        if WEIGHT in name:
+        if 'weight' in name:
             total_params += param.numel()
             zero_params += (param == 0).sum().item()
     
@@ -378,11 +379,11 @@ def local_l1_unstructured_prune(model, sparsity, exclude_types=None):
         if isinstance(module, tuple(exclude_types)):
             continue
         if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-            prune.l1_unstructured(module, name=WEIGHT, amount=sparsity)
+            prune.l1_unstructured(module, name='weight', amount=sparsity)
     
     for name, module in model.named_modules():
         if hasattr(module, 'weight_orig'):
-            prune.remove(module, WEIGHT)
+            prune.remove(module, 'weight')
     
     return model
 
@@ -395,11 +396,11 @@ def local_random_unstructured_prune(model, sparsity, exclude_types=None):
         if isinstance(module, tuple(exclude_types)):
             continue
         if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-            prune.random_unstructured(module, name=WEIGHT, amount=sparsity)
+            prune.random_unstructured(module, name='weight', amount=sparsity)
     
     for name, module in model.named_modules():
         if hasattr(module, 'weight_orig'):
-            prune.remove(module, WEIGHT)
+            prune.remove(module, 'weight')
     
     return model
 
@@ -461,14 +462,14 @@ def structured_l1_prune(model, sparsity, exclude_types=None):
             dim = 0 if len(module.weight.shape) >= 2 else None
             if dim is not None:
                 try:
-                    prune.ln_structured(module, name=WEIGHT, amount=sparsity, n=1, dim=dim)
+                    prune.ln_structured(module, name='weight', amount=sparsity, n=1, dim=dim)
                 except ValueError:
                     # Skip if structured pruning not applicable
                     pass
     
     for name, module in model.named_modules():
         if hasattr(module, 'weight_orig'):
-            prune.remove(module, WEIGHT)
+            prune.remove(module, 'weight')
     
     return model
 
@@ -484,13 +485,13 @@ def structured_l2_prune(model, sparsity, exclude_types=None):
             dim = 0 if len(module.weight.shape) >= 2 else None
             if dim is not None:
                 try:
-                    prune.ln_structured(module, name=WEIGHT, amount=sparsity, n=2, dim=dim)
+                    prune.ln_structured(module, name='weight', amount=sparsity, n=2, dim=dim)
                 except ValueError:
                     pass
     
     for name, module in model.named_modules():
         if hasattr(module, 'weight_orig'):
-            prune.remove(module, WEIGHT)
+            prune.remove(module, 'weight')
     
     return model
 
@@ -506,13 +507,13 @@ def random_structured_prune(model, sparsity, exclude_types=None):
             dim = 0 if len(module.weight.shape) >= 2 else None
             if dim is not None:
                 try:
-                    prune.random_structured(module, name=WEIGHT, amount=sparsity, dim=dim)
+                    prune.random_structured(module, name='weight', amount=sparsity, dim=dim)
                 except ValueError:
                     pass
     
     for name, module in model.named_modules():
         if hasattr(module, 'weight_orig'):
-            prune.remove(module, WEIGHT)
+            prune.remove(module, 'weight')
     
     return model
 
@@ -528,7 +529,7 @@ def l1_unstructured_with_bias_prune(model, sparsity, exclude_types=None):
         if isinstance(module, tuple(exclude_types)):
             continue
         if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-            parameters_to_prune.append((module, WEIGHT))
+            parameters_to_prune.append((module, 'weight'))
         if hasattr(module, 'bias') and module.bias is not None:
             parameters_to_prune.append((module, 'bias'))
     
@@ -557,7 +558,7 @@ def global_prune_specific_layers(model, sparsity, layer_types=None, pruning_meth
     for name, module in model.named_modules():
         if isinstance(module, tuple(layer_types)):
             if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-                parameters_to_prune.append((module, WEIGHT))
+                parameters_to_prune.append((module, 'weight'))
     
     if not parameters_to_prune:
         print("Warning: No parameters found to prune")
@@ -672,6 +673,7 @@ print(">>", args.prune_method, args.sparsity)
 prune_dispatch(model, args.prune_method, sparsity=args.sparsity)
 
 # app/run/act --------------------
+
 ### Get activations for each channel for each image ###
 layer_activations_all = []
 
@@ -682,10 +684,11 @@ with torch.no_grad():
         labels = labels.to(DEVICE)
 
         layer_activations = intermediate_layer_model(images)
-        layer_activations = layer_activations.detach().to(torch.float16).to('cpu')
+        layer_activations = layer_activations.detach().to(torch.float16).to(CPU)
         layer_activations_all.append(layer_activations)
 
 layer_activations_all = torch.cat(layer_activations_all, dim=0) # nr_images(50_000) x nr_channels
+
 
 ### Get activations for top images ###
 layer_activations_topk = torch.topk(layer_activations_all, args.nr_images_per_channel, dim=0)[0] # args.nr_images_per_channel x nr_channels
@@ -694,8 +697,10 @@ print('Top activating images (std):', layer_activations_topk.std(dim=0).mean())
 
 ### Get activations for random images ###
 nr_samples = layer_activations_all.shape[0]
+
 # get N unique random indices along the batch dimension
 rand_indices = torch.randperm(nr_samples)[:args.nr_images_per_channel]
+
 # sample those rows
 layer_activations_random = layer_activations_all[rand_indices]  # shape: [N, nr_activations]
 print('Activations for random images (mean):', layer_activations_random.mean())
@@ -710,71 +715,16 @@ loader_for_patches = torch.utils.data.DataLoader(
         pin_memory=True)
 
 nr_channels = layer_activations_all.shape[1]
+
 if   args.model in ['vgg19', 'resnet50']: bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images = get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="cnn", return_images=True)
 elif args.model == 'vit_b_16': bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images= get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="vit", return_images=True)
 
-# app/run/save --------------------
+# app/run/patches --------------------
 
-out_dir = "./outtt/patches"
-print(f"saves to {out_dir}")
-os.makedirs(out_dir, exist_ok=True)
-
-mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-std  = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-
-def to_vis(t):
-    """[3,H,W] normalized -> [3,H,W] in [0,1]."""
-    return (t.detach().cpu() * std + mean).clamp(0, 1)
-
-def get_source_image(dataset_idx):
-    img, _ = loader.dataset[int(dataset_idx)]      # post-transform image, same as model saw
-    return to_vis(img)                 # [3,H,W] in [0,1]
+# paste_patches
 
 
-def save_side(patches, scores, imgs, tag):
-    C,K = patches.shape[:2]
-    manifest = []
-    for c in range(C):
-        class_dir = os.path.join(out_dir, tag, f"{c:04d}")
-        print(f"for {c=}")
-        os.makedirs(class_dir, exist_ok=True)
-        row = []
-        for k in range(K):
-            p = to_vis(patches[c, k])                       # [3,P,P]
-            patch_path = os.path.join(class_dir, f"{tag}_class{c:04d}_rank{k}_patch.png")
-            save_image(p, patch_path)
-            row.append(p)
-
-            src = get_source_image(imgs[c, k])              # [3,H,W]
-            src_path = os.path.join(class_dir, f"{tag}_class{c:04d}_rank{k}_source.png")
-            save_image(src, src_path)
-
-            manifest.append({
-                "class_idx": c, 
-                "rank": k, 
-                "side": tag,
-                "score": float(scores[c, k]),
-                "source_iteration": int(imgs[c, k]),
-                "patch_path": patch_path,
-                "source_path": src_path,
-            })
-
-        grid = make_grid(torch.stack(row), nrow=K, padding=2)
-        save_image(grid, os.path.join(class_dir, f"{tag}_class{c:02d}_grid.png"))
-    return manifest
-
-print(f">> {top_patches.shape=}")
-print("save tops")
-manifest  = save_side(top_patches,    top_patches_scores,    top_images, "top")
-print("save bottoms")
-manifest += save_side(bottom_patches, bottom_patches_scores, bottom_images,  "bottom")
-
-with open(os.path.join(out_dir, "manifest.json"), "w") as f:
-    json.dump(manifest, f, indent=2)
-
-print(f"Saved {len(manifest)} patches + sources to {out_dir}/")
-
-# app/run/calc --------------------
+# app/run/stats --------------------
 
 mean_activations_per_channel_bottom_patches = []
 mean_activations_per_channel_top_patches = []
@@ -799,8 +749,10 @@ for channel_idx in tqdm(range(nr_channels)):
     topk_dataset = Subset(dataset_subset, topk_idx)
     topk_loader = torch.utils.data.DataLoader(
         topk_dataset,
-        batch_size=args.batch_size, shuffle=False,
-        num_workers=0, pin_memory=True)
+        batch_size=args.batch_size, 
+        shuffle=False,
+        num_workers=0, 
+        pin_memory=True)
 
     bottom_patches_for_channel = bottom_patches[channel_idx] # 16, 3, 32, 32
     top_patches_for_channel = top_patches[channel_idx] # 16, 3, 32, 32
@@ -815,15 +767,15 @@ for channel_idx in tqdm(range(nr_channels)):
             images_with_random_patches = paste_patches(images, random_patches_for_channel)
 
             channel_activations_bottom_patches = intermediate_layer_model(images_with_bottom_patches)[:,channel_idx]
-            channel_activations_bottom_patches = channel_activations_bottom_patches.detach().to(torch.float16).to('cpu')
+            channel_activations_bottom_patches = channel_activations_bottom_patches.detach().to(torch.float16).to(CPU)
             activations_for_channel_bottom_patches.append(channel_activations_bottom_patches)
 
             channel_activations_top_patches = intermediate_layer_model(images_with_top_patches)[:,channel_idx]
-            channel_activations_top_patches = channel_activations_top_patches.detach().to(torch.float16).to('cpu')
+            channel_activations_top_patches = channel_activations_top_patches.detach().to(torch.float16).to(CPU)
             activations_for_channel_top_patches.append(channel_activations_top_patches)
 
             channel_activations_random_patches = intermediate_layer_model(images_with_random_patches)[:,channel_idx]
-            channel_activations_random_patches = channel_activations_random_patches.detach().to(torch.float16).to('cpu')
+            channel_activations_random_patches = channel_activations_random_patches.detach().to(torch.float16).to(CPU)
             activations_for_channel_random_patches.append(channel_activations_random_patches)
                 
     activations_for_channel_bottom_patches = torch.cat(activations_for_channel_bottom_patches, dim=0)
