@@ -57,7 +57,7 @@ class ModelWrapper(torch.nn.Module):
             x = torch.min(self.activations["output"], dim=1).values
         return x
 
-#  ...---------------------
+# functionality ---------------------
 
 # remove inplace operations
 def ReLU_inplace_to_False(module):
@@ -185,7 +185,7 @@ def get_lowest_highest_patches(
             raw_patches = torch.stack(raw_patches, dim=0)
             raw_patches = raw_patches.view(num_windows, 3, patch_size, patch_size)
 
-            image_top_scores = torch.ones((output_size, num_patches), device=DEVICE) * (-float("inf"))
+            image_top_scores = torch.ones((output_size, num_patches), device=DEVICE) * float("-inf")
             image_bottom_scores = torch.ones((output_size, num_patches), device=DEVICE) * float("inf")
             image_top_indices = torch.zeros((output_size, num_patches), device=DEVICE, dtype=torch.long)
             image_bottom_indices = torch.zeros((output_size, num_patches), device=DEVICE, dtype=torch.long)
@@ -205,6 +205,7 @@ def get_lowest_highest_patches(
                 for k in range(current_chunk_size):
                     y = window_y[k] * stride
                     x = window_x[k] * stride
+
                     masked_images[k, :, y:y + patch_size, x:x + patch_size] = images[0, :, y:y + patch_size, x:x + patch_size]
 
                 outputs = model(masked_images)
@@ -305,6 +306,8 @@ def paste_patches(images, patches):
         augmented_images[i, :, y:y+patch_size, x:x+patch_size] = patch
 
     return augmented_images
+
+# utils ---------------------
 
 def split_dataset_by_factor(dataset, factor, seed):
     """
@@ -604,7 +607,7 @@ parser.add_argument('--prune_method', default=None, type=str, help='pruning meth
 
 # app/run/args --------------------
 
-args = [
+args = parser.parse_args([
     '--data_dir', 'D:/sautkin.imagenet1kvalid/',
     '--model', 'resnet50',
     '--model_layer', 'model.layer4[2].conv3',
@@ -616,8 +619,7 @@ args = [
     '--sparsity', '0',
     '--prune_method', 'local-unstructured-L1',
     '--data_ratio', '0.002',
-]
-args = parser.parse_args(args)
+])
 
 print("Arguments:")
 for key, value in vars(args).items():
