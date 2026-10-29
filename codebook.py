@@ -709,273 +709,9 @@ parser.add_argument('--sparsity', default=0.0, type=float, help='sparsity')
 parser.add_argument('--data_ratio', default=1.0, type=float, help='ratio')
 parser.add_argument('--prune_method', default=None, type=str, help='pruning method')
 
-# app/main --------------------
+# app/run/args --------------------
 
-def main(args = []):
-    args = parser.parse_args(args)
-
-    # Show args -------------------------------
-    print("Arguments:")
-    for key, value in vars(args).items():
-        print(f"  --{key}: {value}")
-    # -----------------------------------------
-    
-    if args.seed is not None:
-        random.seed(args.seed)
-        torch.manual_seed(args.seed)
-
-    ### Model ###
-    if   args.model == 'vgg19':    model = models.vgg19   (weights=models.   VGG19_Weights.IMAGENET1K_V1)
-    elif args.model == 'resnet50': model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
-    elif args.model == 'vit_b_16': model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
-    else:
-        print('Model not implemented!')
-        assert False
-
-    # remove inplace operations
-    ReLU_inplace_to_False(model)
-    intermediate_layer_model = ModelWrapper(model, eval(args.model_layer))
-
-    print("CUDA")
-    intermediate_layer_model.eval()
-    intermediate_layer_model.to(DEVICE)
-
-    print("Load")
-    ### Dataset ###
-    valdir = os.path.join(args.data_dir)
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                      std=[0.229, 0.224, 0.225])
-
-    print("Dataset")
-    dataset = datasets.ImageFolder(valdir, transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-            ]))
-    
-    print("Subset")
-    # split dataset ------------------------------------------------
-    dataset, _ = split_dataset_by_factor(dataset, args.data_ratio, args.seed)
-    # --------------------------------------------------------------
-
-    print("Loader")
-    loader = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=args.batch_size, 
-            shuffle=False,      # critical to reproduce
-            num_workers=4, 
-            prefetch_factor=4,  # Prefetch batches in background
-            pin_memory=True)
-
-    
-    # pruning -----------------------------------   
-    print(">>", args.prune_method, args.sparsity)
-    prune_dispatch(model, args.prune_method, sparsity=args.sparsity)
-    # --------------------------------------------------------
-    
-    
-    ### Get activations for each channel for each image ###
-    layer_activations_all = []
-
-    print("Start")
-    with torch.no_grad():
-        for images, labels in tqdm(loader):
-            images = images.to(DEVICE)
-            labels = labels.to(DEVICE)
-
-            layer_activations = intermediate_layer_model(images)
-            layer_activations = layer_activations.detach().to(torch.float16).to('cpu')
-            layer_activations_all.append(layer_activations)
-
-    layer_activations_all = torch.cat(layer_activations_all, dim=0) # nr_images(50_000) x nr_channels
-
-    ### Get activations for top images ###
-    layer_activations_topk = torch.topk(layer_activations_all, args.nr_images_per_channel, dim=0)[0] # args.nr_images_per_channel x nr_channels
-    print('Top activating images (mean):', layer_activations_topk.mean())
-    print('Top activating images (std):', layer_activations_topk.std(dim=0).mean())
-
-    ### Get activations for random images ###
-    nr_samples = layer_activations_all.shape[0]
-    # get N unique random indices along the batch dimension
-    rand_indices = torch.randperm(nr_samples)[:args.nr_images_per_channel]
-    # sample those rows
-    layer_activations_random = layer_activations_all[rand_indices]  # shape: [N, nr_activations]
-    print('Activations for random images (mean):', layer_activations_random.mean())
-    print('Activations for random images (std):', layer_activations_random.std(dim=0).mean())
-
-    ### Get patches with lowest and highest activations for each channel ###
-    loader_for_patches = torch.utils.data.DataLoader(
-            dataset,
-            batch_size=1, 
-            shuffle=False,
-            num_workers=0, 
-            pin_memory=True)
-
-    nr_channels = layer_activations_all.shape[1]
-    if args.model == 'vgg19' or args.model == 'resnet50':
-        bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images = get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="cnn", return_images=True)
-    elif args.model == 'vit_b_16':
-        bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images= get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="vit", return_images=True)
-
-
-
-
-
-
-
-    
-
-    out_dir = "outs/patches"
-    os.makedirs(out_dir, exist_ok=True)
-    
-    mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-    std  = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-    
-    def to_vis(t):
-        """[3,H,W] normalized -> [3,H,W] in [0,1]."""
-        return (t.detach().cpu() * std + mean).clamp(0, 1)
-    
-    # the dataset behind the dataloader — safe because batch_size=1, shuffle=False
-    ds = loader.dataset
-    
-    def get_source_image(dataset_idx):
-        img, _ = ds[int(dataset_idx)]      # post-transform image, same as model saw
-        return to_vis(img)                 # [3,H,W] in [0,1]
-    
-    def save_side(patches, scores, imgs, tag):
-        print(f">> {patches.shape=}")
-        K,C = patches.shape[:2]
-        manifest = []
-        for c in range(C):
-            print(f"for {c=}")
-            class_dir = os.path.join(out_dir, tag, f"class_{c:02d}")
-            os.makedirs(class_dir, exist_ok=True)
-            row = []
-            for k in range(K):
-                p = to_vis(patches[c, k])                       # [3,P,P]
-                patch_path = os.path.join(class_dir, f"{tag}_class{c:04d}_rank{k}_patch.png")
-                save_image(p, patch_path)
-                row.append(p)
-    
-                src = get_source_image(imgs[c, k])              # [3,H,W]
-                src_path = os.path.join(class_dir, f"{tag}_class{c:04d}_rank{k}_source.png")
-                save_image(src, src_path)
-    
-                manifest.append({
-                    "class": c, "rank": k, "side": tag,
-                    "score": float(scores[c, k]),
-                    "source_iteration": int(imgs[c, k]),
-                    "patch_path": patch_path,
-                    "source_path": src_path,
-                })
-    
-            grid = make_grid(torch.stack(row), nrow=K, padding=2)
-            save_image(grid, os.path.join(class_dir, f"{tag}_class{c:02d}_grid.png"))
-        return manifest
-
-    print("save tops")
-    manifest  = save_side(top_patches,    top_patches_scores,    top_images, "top")
-    print("save bottoms")
-    manifest += save_side(bottom_patches, bottom_patches_scores, bottom_images,  "bottom")
-    
-    with open(os.path.join(out_dir, "manifest.json"), "w") as f:
-        json.dump(manifest, f, indent=2)
-    
-    print(f"Saved {len(manifest)} patches + sources to {out_dir}/")
-
-
-
-
-
-
-
-
-    
-
-    
-    mean_activations_per_channel_bottom_patches = []
-    mean_activations_per_channel_top_patches = []
-    mean_activations_per_channel_random_patches = []
-
-    std_activations_per_channel_bottom_patches = []
-    std_activations_per_channel_top_patches = []
-    std_activations_per_channel_random_patches = []
-
-    ### Get activations for top images with patches inserted ###
-    nr_channels = layer_activations_all.shape[1]
-    nr_channels_w_significant_change = 0
-    nr_channels_wo_significant_change = 0
-
-    for channel_idx in tqdm(range(nr_channels)):
-
-        activations_for_channel_bottom_patches = []
-        activations_for_channel_top_patches = []
-        activations_for_channel_random_patches = []
-
-        topk_idx = torch.topk(layer_activations_all[:,channel_idx], args.nr_images_per_channel, dim=0)[1]
-        topk_dataset = Subset(dataset, topk_idx)
-        topk_loader = torch.utils.data.DataLoader(
-           topk_dataset,
-           batch_size=args.batch_size, shuffle=False,
-           num_workers=0, pin_memory=True)
-
-        bottom_patches_for_channel = bottom_patches[channel_idx] # 16, 3, 32, 32
-        top_patches_for_channel = top_patches[channel_idx] # 16, 3, 32, 32
-        random_patches_for_channel = get_random_patches(loader, args.patch_size, args.patch_stride, args.nr_patches) # 16, 3, 32, 32
-
-        with torch.no_grad():
-            for images, labels in topk_loader:
-                images = images.cuda()
-
-                images_with_bottom_patches = paste_patches(images, bottom_patches_for_channel)
-                images_with_top_patches = paste_patches(images, top_patches_for_channel)
-                images_with_random_patches = paste_patches(images, random_patches_for_channel)
-
-                channel_activations_bottom_patches = intermediate_layer_model(images_with_bottom_patches)[:,channel_idx]
-                channel_activations_bottom_patches = channel_activations_bottom_patches.detach().to(torch.float16).to('cpu')
-                activations_for_channel_bottom_patches.append(channel_activations_bottom_patches)
-
-                channel_activations_top_patches = intermediate_layer_model(images_with_top_patches)[:,channel_idx]
-                channel_activations_top_patches = channel_activations_top_patches.detach().to(torch.float16).to('cpu')
-                activations_for_channel_top_patches.append(channel_activations_top_patches)
-
-                channel_activations_random_patches = intermediate_layer_model(images_with_random_patches)[:,channel_idx]
-                channel_activations_random_patches = channel_activations_random_patches.detach().to(torch.float16).to('cpu')
-                activations_for_channel_random_patches.append(channel_activations_random_patches)
-                    
-        activations_for_channel_bottom_patches = torch.cat(activations_for_channel_bottom_patches, dim=0)
-        activations_for_channel_top_patches = torch.cat(activations_for_channel_top_patches, dim=0)
-        activations_for_channel_random_patches = torch.cat(activations_for_channel_random_patches, dim=0)
-
-        mean_activations_per_channel_bottom_patches.append(torch.tensor([activations_for_channel_bottom_patches.mean()]))
-        mean_activations_per_channel_top_patches.append(torch.tensor([activations_for_channel_top_patches.mean()]))
-        mean_activations_per_channel_random_patches.append(torch.tensor([activations_for_channel_random_patches.mean()]))
-
-        std_activations_per_channel_bottom_patches.append(torch.tensor([activations_for_channel_bottom_patches.std()]))
-        std_activations_per_channel_top_patches.append(torch.tensor([activations_for_channel_top_patches.std()]))
-        std_activations_per_channel_random_patches.append(torch.tensor([activations_for_channel_random_patches.std()]))
-
-        stat, p_value = ttest_ind(activations_for_channel_random_patches.flatten().detach().cpu().numpy(), activations_for_channel_bottom_patches.flatten().detach().cpu().numpy())
-        if p_value <= 0.05:
-            nr_channels_w_significant_change += 1
-        else:
-            nr_channels_wo_significant_change += 1
-
-
-    print('Activations for top images with bottom patches (mean):', torch.cat(mean_activations_per_channel_bottom_patches, dim=0).mean())
-    print('Activations for top images with bottom patches (std):', torch.cat(std_activations_per_channel_bottom_patches, dim=0).mean())
-    print('Activations for top images with top patches (mean):', torch.cat(mean_activations_per_channel_top_patches, dim=0).mean())
-    print('Activations for top images with top patches (std):', torch.cat(std_activations_per_channel_top_patches, dim=0).mean())
-    print('Activations for top images with random patches (mean):', torch.cat(mean_activations_per_channel_random_patches, dim=0).mean())
-    print('Activations for top images with random patches (std):', torch.cat(std_activations_per_channel_random_patches, dim=0).mean())
-
-    print('Number channels with significant change:', nr_channels_w_significant_change)
-    print('Number channels without significant change:', nr_channels_wo_significant_change)
-
-# app/run -------------------
-
-main([
+args = [
     '--data_dir', 'D:/sautkin.imagenet1kvalid/',
     '--model', 'resnet50',
     '--model_layer', 'model.layer4[2].conv3',
@@ -987,8 +723,255 @@ main([
     '--sparsity', '0',
     '--prune_method', 'local-unstructured-L1',
     '--data_ratio', '0.01',
-])
+]
+args = parser.parse_args(args)
 
+print("Arguments:")
+for key, value in vars(args).items():
+    print(f"  --{key}: {value}")
+
+# app/run/model/select --------------------
+
+if args.seed is not None:
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+### Model ###
+if   args.model == 'vgg19':    model = models.vgg19   (weights=models.   VGG19_Weights.IMAGENET1K_V1)
+elif args.model == 'resnet50': model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+elif args.model == 'vit_b_16': model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
+else:
+    print('Model not implemented!')
+    assert False
+
+# app/run/model/prepare --------------------
+
+# remove inplace operations
+ReLU_inplace_to_False(model)
+intermediate_layer_model = ModelWrapper(model, eval(args.model_layer))
+intermediate_layer_model.eval()
+intermediate_layer_model.to(DEVICE)
+
+# app/run/dataset/load --------------------
+
+print("dataset")
+valdir = os.path.join(args.data_dir)
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+dataset = datasets.ImageFolder(valdir, transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            normalize,
+        ]))
+# app/run/dataset/split --------------------
+dataset, _ = split_dataset_by_factor(dataset, args.data_ratio, args.seed)
+
+# app/run/dataset/loader --------------------
+loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=args.batch_size, 
+        shuffle=False,      # critical to reproduce
+        num_workers=4, 
+        prefetch_factor=4,  # Prefetch batches in background
+        pin_memory=True)
+
+# app/run/prune --------------------
+print(">>", args.prune_method, args.sparsity)
+prune_dispatch(model, args.prune_method, sparsity=args.sparsity)
+
+# app/run/act --------------------
+### Get activations for each channel for each image ###
+layer_activations_all = []
+
+print("Start")
+with torch.no_grad():
+    for images, labels in tqdm(loader):
+        images = images.to(DEVICE)
+        labels = labels.to(DEVICE)
+
+        layer_activations = intermediate_layer_model(images)
+        layer_activations = layer_activations.detach().to(torch.float16).to('cpu')
+        layer_activations_all.append(layer_activations)
+
+layer_activations_all = torch.cat(layer_activations_all, dim=0) # nr_images(50_000) x nr_channels
+
+### Get activations for top images ###
+layer_activations_topk = torch.topk(layer_activations_all, args.nr_images_per_channel, dim=0)[0] # args.nr_images_per_channel x nr_channels
+print('Top activating images (mean):', layer_activations_topk.mean())
+print('Top activating images (std):', layer_activations_topk.std(dim=0).mean())
+
+### Get activations for random images ###
+nr_samples = layer_activations_all.shape[0]
+# get N unique random indices along the batch dimension
+rand_indices = torch.randperm(nr_samples)[:args.nr_images_per_channel]
+# sample those rows
+layer_activations_random = layer_activations_all[rand_indices]  # shape: [N, nr_activations]
+print('Activations for random images (mean):', layer_activations_random.mean())
+print('Activations for random images (std):', layer_activations_random.std(dim=0).mean())
+
+### Get patches with lowest and highest activations for each channel ###
+loader_for_patches = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=1, 
+        shuffle=False,
+        num_workers=0, 
+        pin_memory=True)
+
+nr_channels = layer_activations_all.shape[1]
+if args.model == 'vgg19' or args.model == 'resnet50':
+    bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images = get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="cnn", return_images=True)
+elif args.model == 'vit_b_16':
+    bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images= get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="vit", return_images=True)
+
+
+
+
+# app/run/save --------------------
+
+out_dir = "outs/patches"
+os.makedirs(out_dir, exist_ok=True)
+
+mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+std  = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+
+def to_vis(t):
+    """[3,H,W] normalized -> [3,H,W] in [0,1]."""
+    return (t.detach().cpu() * std + mean).clamp(0, 1)
+
+def get_source_image(dataset_idx):
+    img, _ = loader.dataset[int(dataset_idx)]      # post-transform image, same as model saw
+    return to_vis(img)                 # [3,H,W] in [0,1]
+
+def save_side(patches, scores, imgs, tag):
+    print(f">> {patches.shape=}")
+    K,C = patches.shape[:2]
+    manifest = []
+    for c in range(C):
+        print(f"for {c=}")
+        class_dir = os.path.join(out_dir, tag, f"class_{c:02d}")
+        os.makedirs(class_dir, exist_ok=True)
+        row = []
+        for k in range(K):
+            p = to_vis(patches[c, k])                       # [3,P,P]
+            patch_path = os.path.join(class_dir, f"{tag}_class{c:04d}_rank{k}_patch.png")
+            save_image(p, patch_path)
+            row.append(p)
+
+            src = get_source_image(imgs[c, k])              # [3,H,W]
+            src_path = os.path.join(class_dir, f"{tag}_class{c:04d}_rank{k}_source.png")
+            save_image(src, src_path)
+
+            manifest.append({
+                "class": c, "rank": k, "side": tag,
+                "score": float(scores[c, k]),
+                "source_iteration": int(imgs[c, k]),
+                "patch_path": patch_path,
+                "source_path": src_path,
+            })
+
+        grid = make_grid(torch.stack(row), nrow=K, padding=2)
+        save_image(grid, os.path.join(class_dir, f"{tag}_class{c:02d}_grid.png"))
+    return manifest
+
+print("save tops")
+manifest  = save_side(top_patches,    top_patches_scores,    top_images, "top")
+print("save bottoms")
+manifest += save_side(bottom_patches, bottom_patches_scores, bottom_images,  "bottom")
+
+with open(os.path.join(out_dir, "manifest.json"), "w") as f:
+    json.dump(manifest, f, indent=2)
+
+print(f"Saved {len(manifest)} patches + sources to {out_dir}/")
+
+
+
+
+
+
+
+
+
+# app/run/calc --------------------
+
+mean_activations_per_channel_bottom_patches = []
+mean_activations_per_channel_top_patches = []
+mean_activations_per_channel_random_patches = []
+
+std_activations_per_channel_bottom_patches = []
+std_activations_per_channel_top_patches = []
+std_activations_per_channel_random_patches = []
+
+### Get activations for top images with patches inserted ###
+nr_channels = layer_activations_all.shape[1]
+nr_channels_w_significant_change = 0
+nr_channels_wo_significant_change = 0
+
+for channel_idx in tqdm(range(nr_channels)):
+
+    activations_for_channel_bottom_patches = []
+    activations_for_channel_top_patches = []
+    activations_for_channel_random_patches = []
+
+    topk_idx = torch.topk(layer_activations_all[:,channel_idx], args.nr_images_per_channel, dim=0)[1]
+    topk_dataset = Subset(dataset, topk_idx)
+    topk_loader = torch.utils.data.DataLoader(
+        topk_dataset,
+        batch_size=args.batch_size, shuffle=False,
+        num_workers=0, pin_memory=True)
+
+    bottom_patches_for_channel = bottom_patches[channel_idx] # 16, 3, 32, 32
+    top_patches_for_channel = top_patches[channel_idx] # 16, 3, 32, 32
+    random_patches_for_channel = get_random_patches(loader, args.patch_size, args.patch_stride, args.nr_patches) # 16, 3, 32, 32
+
+    with torch.no_grad():
+        for images, labels in topk_loader:
+            images = images.cuda()
+
+            images_with_bottom_patches = paste_patches(images, bottom_patches_for_channel)
+            images_with_top_patches = paste_patches(images, top_patches_for_channel)
+            images_with_random_patches = paste_patches(images, random_patches_for_channel)
+
+            channel_activations_bottom_patches = intermediate_layer_model(images_with_bottom_patches)[:,channel_idx]
+            channel_activations_bottom_patches = channel_activations_bottom_patches.detach().to(torch.float16).to('cpu')
+            activations_for_channel_bottom_patches.append(channel_activations_bottom_patches)
+
+            channel_activations_top_patches = intermediate_layer_model(images_with_top_patches)[:,channel_idx]
+            channel_activations_top_patches = channel_activations_top_patches.detach().to(torch.float16).to('cpu')
+            activations_for_channel_top_patches.append(channel_activations_top_patches)
+
+            channel_activations_random_patches = intermediate_layer_model(images_with_random_patches)[:,channel_idx]
+            channel_activations_random_patches = channel_activations_random_patches.detach().to(torch.float16).to('cpu')
+            activations_for_channel_random_patches.append(channel_activations_random_patches)
+                
+    activations_for_channel_bottom_patches = torch.cat(activations_for_channel_bottom_patches, dim=0)
+    activations_for_channel_top_patches = torch.cat(activations_for_channel_top_patches, dim=0)
+    activations_for_channel_random_patches = torch.cat(activations_for_channel_random_patches, dim=0)
+
+    mean_activations_per_channel_bottom_patches.append(torch.tensor([activations_for_channel_bottom_patches.mean()]))
+    mean_activations_per_channel_top_patches.append(torch.tensor([activations_for_channel_top_patches.mean()]))
+    mean_activations_per_channel_random_patches.append(torch.tensor([activations_for_channel_random_patches.mean()]))
+
+    std_activations_per_channel_bottom_patches.append(torch.tensor([activations_for_channel_bottom_patches.std()]))
+    std_activations_per_channel_top_patches.append(torch.tensor([activations_for_channel_top_patches.std()]))
+    std_activations_per_channel_random_patches.append(torch.tensor([activations_for_channel_random_patches.std()]))
+
+    stat, p_value = ttest_ind(activations_for_channel_random_patches.flatten().detach().cpu().numpy(), activations_for_channel_bottom_patches.flatten().detach().cpu().numpy())
+    if p_value <= 0.05:
+        nr_channels_w_significant_change += 1
+    else:
+        nr_channels_wo_significant_change += 1
+
+# app/run/log --------------------
+
+print('Activations for top images with bottom patches (mean):', torch.cat(mean_activations_per_channel_bottom_patches, dim=0).mean())
+print('Activations for top images with bottom patches (std):', torch.cat(std_activations_per_channel_bottom_patches, dim=0).mean())
+print('Activations for top images with top patches (mean):', torch.cat(mean_activations_per_channel_top_patches, dim=0).mean())
+print('Activations for top images with top patches (std):', torch.cat(std_activations_per_channel_top_patches, dim=0).mean())
+print('Activations for top images with random patches (mean):', torch.cat(mean_activations_per_channel_random_patches, dim=0).mean())
+print('Activations for top images with random patches (std):', torch.cat(std_activations_per_channel_random_patches, dim=0).mean())
+
+print('Number channels with significant change:', nr_channels_w_significant_change)
+print('Number channels without significant change:', nr_channels_wo_significant_change)
 
 # app/more --------------------
 
