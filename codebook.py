@@ -135,8 +135,9 @@ def get_lowest_highest_patches(
 
     print(f"Finding patches ({architecture})...")
     iteration = 0
+    all_labels = []
 
-    for images, label in tqdm(dataloader):
+    for images, labels in tqdm(dataloader):
         images = images.to(DEVICE)
         batch_size, channels, height, width = images.shape
         assert batch_size == 1 and channels == 3, f"Expected [1,3,H,W], got {images.shape}"
@@ -273,11 +274,12 @@ def get_lowest_highest_patches(
             lowest_images = bottom_images
 
         iteration += 1
+        all_labels.append(labels[0])
 
     if return_images:
         return bottom_patches, bottom_patches_scores, lowest_images, top_patches, top_patches_scores, highest_images
     else:
-        return bottom_patches, bottom_patches_scores, top_patches, top_patches_scores
+        return bottom_patches, bottom_patches_scores, None, top_patches, top_patches_scores, None
 
 def paste_patches(images, patches):
     B, C, H, W = images.shape
@@ -364,11 +366,6 @@ def get_sparsity(model):
             zero_params += (param == 0).sum().item()
     
     return zero_params / total_params if total_params > 0 else 0
-
-def train_model(model, train_loader, epochs=1):
-    """Placeholder training function - replace with your training logic"""
-    # Your training code here
-    return model
 
 # Pruning/local --------------------
 
@@ -519,111 +516,6 @@ def random_structured_prune(model, sparsity, exclude_types=None):
     
     return model
 
-# Pruning/iterative --------------------
-
-def iterative_l1_prune(model, sparsity, steps=5, retrain_epochs=1, train_loader=None, exclude_types=None):
-    """Iterative pruning with retraining between steps"""
-    target_sparsity = sparsity
-    step_sparsity = target_sparsity / steps
-    
-    parameters_to_prune = get_prunable_modules(model, exclude_types)
-    
-    if not parameters_to_prune:
-        print("Warning: No parameters found to prune")
-        return model
-    
-    for step in range(steps):
-        # Prune incrementally
-        prune.global_unstructured(
-            parameters_to_prune,
-            pruning_method=prune.L1Unstructured,
-            amount=step_sparsity
-        )
-        
-        # Remove masks to make pruning permanent before retraining
-        for module, name in parameters_to_prune:
-            if hasattr(module, 'weight_orig'):
-                prune.remove(module, name)
-        
-        # Retrain to recover accuracy
-        if train_loader is not None:
-            model = train_model(model, train_loader, epochs=retrain_epochs)
-        
-        current_sparsity = get_sparsity(model)
-        print(f"Iteration {step+1}/{steps}: {current_sparsity:.2%} sparsity")
-    
-    return model
-
-def lottery_ticket_prune(model, sparsity, steps=5, retrain_epochs=1, train_loader=None, exclude_types=None):
-    """Lottery Ticket Hypothesis: iterative pruning with weight rewinding"""
-    # Store initial weights
-    initial_weights = {}
-    for name, param in model.named_parameters():
-        if WEIGHT in name:
-            initial_weights[name] = param.data.clone()
-    
-    parameters_to_prune = get_prunable_modules(model, exclude_types)
-    
-    if not parameters_to_prune:
-        print("Warning: No parameters found to prune")
-        return model
-    
-    step_sparsity = sparsity / steps
-    
-    for step in range(steps):
-        # Prune
-        prune.global_unstructured(
-            parameters_to_prune,
-            pruning_method=prune.L1Unstructured,
-            amount=step_sparsity
-        )
-        
-        # Rewind: Reset weights to initial values (but keep mask)
-        for name, param in model.named_parameters():
-            if WEIGHT in name and 'mask' not in name:
-                # Get the mask (if it exists)
-                module_name = name.replace('._orig', '').replace('weight', '').rstrip('.')
-                # Find the corresponding module
-                for module, _ in parameters_to_prune:
-                    if hasattr(module, 'weight_mask'):
-                        mask = module.weight_mask
-                        # Reset weights
-                        if name in initial_weights:
-                            param.data = initial_weights[name].clone()
-                            param.data *= mask
-                        break
-        
-        # Remove masks and retrain
-        for module, name in parameters_to_prune:
-            if hasattr(module, 'weight_orig'):
-                prune.remove(module, name)
-        
-        if train_loader is not None:
-            model = train_model(model, train_loader, epochs=retrain_epochs)
-        
-        print(f"Lottery Ticket iteration {step+1}/{steps} complete")
-    
-    return model
-
-# Pruning/custom mask --------------------
-
-def custom_mask_prune(model, threshold=0.05, exclude_types=None):
-    """Apply custom magnitude-based mask"""
-    if exclude_types is None:
-        exclude_types = []
-    
-    for name, module in model.named_modules():
-        if isinstance(module, tuple(exclude_types)):
-            continue
-        if hasattr(module, 'weight') and isinstance(module.weight, torch.nn.Parameter):
-            # Create mask based on weight magnitude
-            weight = module.weight
-            mask = (torch.abs(weight) > threshold).float()
-            prune.custom_from_mask(module, name=WEIGHT, mask=mask)
-            prune.remove(module, WEIGHT)
-    
-    return model
-
 # Pruning/more --------------------
 
 def l1_unstructured_with_bias_prune(model, sparsity, exclude_types=None):
@@ -693,7 +585,7 @@ def prune_dispatch(model, method, *args, **kwargs):
     else:
         assert False, f"prune method '{method}' is not deifned"
 
-# app/CLI args --------------------
+# app/config/args --------------------
 
 parser = argparse.ArgumentParser(description='Quantitative results for image classification')
 parser.add_argument('--data_dir', metavar='DIR', default='/kaggle/input/datasets/sautkin/imagenet1kvalid/', help='path to dataset')
@@ -722,7 +614,7 @@ args = [
     '--seed', '0',
     '--sparsity', '0',
     '--prune_method', 'local-unstructured-L1',
-    '--data_ratio', '0.01',
+    '--data_ratio', '0.002',
 ]
 args = parser.parse_args(args)
 
@@ -730,7 +622,7 @@ print("Arguments:")
 for key, value in vars(args).items():
     print(f"  --{key}: {value}")
 
-# app/run/model/select --------------------
+# app/run/prepare --------------------
 
 if args.seed is not None:
     random.seed(args.seed)
@@ -757,18 +649,18 @@ intermediate_layer_model.to(DEVICE)
 print("dataset")
 valdir = os.path.join(args.data_dir)
 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-dataset = datasets.ImageFolder(valdir, transforms.Compose([
+dataset_full = datasets.ImageFolder(valdir, transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
             normalize,
         ]))
 # app/run/dataset/split --------------------
-dataset, _ = split_dataset_by_factor(dataset, args.data_ratio, args.seed)
+dataset_subset, _ = split_dataset_by_factor(dataset_full, args.data_ratio, args.seed)
 
 # app/run/dataset/loader --------------------
 loader = torch.utils.data.DataLoader(
-        dataset,
+        dataset_subset,
         batch_size=args.batch_size, 
         shuffle=False,      # critical to reproduce
         num_workers=4, 
@@ -811,24 +703,20 @@ print('Activations for random images (std):', layer_activations_random.std(dim=0
 
 ### Get patches with lowest and highest activations for each channel ###
 loader_for_patches = torch.utils.data.DataLoader(
-        dataset,
+        dataset_subset,
         batch_size=1, 
         shuffle=False,
         num_workers=0, 
         pin_memory=True)
 
 nr_channels = layer_activations_all.shape[1]
-if args.model == 'vgg19' or args.model == 'resnet50':
-    bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images = get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="cnn", return_images=True)
-elif args.model == 'vit_b_16':
-    bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images= get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="vit", return_images=True)
-
-
-
+if   args.model in ['vgg19', 'resnet50']: bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images = get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="cnn", return_images=True)
+elif args.model == 'vit_b_16': bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images= get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="vit", return_images=True)
 
 # app/run/save --------------------
 
-out_dir = "outs/patches"
+out_dir = "./outtt/patches"
+print(f"saves to {out_dir}")
 os.makedirs(out_dir, exist_ok=True)
 
 mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
@@ -842,13 +730,13 @@ def get_source_image(dataset_idx):
     img, _ = loader.dataset[int(dataset_idx)]      # post-transform image, same as model saw
     return to_vis(img)                 # [3,H,W] in [0,1]
 
+
 def save_side(patches, scores, imgs, tag):
-    print(f">> {patches.shape=}")
-    K,C = patches.shape[:2]
+    C,K = patches.shape[:2]
     manifest = []
     for c in range(C):
+        class_dir = os.path.join(out_dir, tag, f"{c:04d}")
         print(f"for {c=}")
-        class_dir = os.path.join(out_dir, tag, f"class_{c:02d}")
         os.makedirs(class_dir, exist_ok=True)
         row = []
         for k in range(K):
@@ -862,7 +750,9 @@ def save_side(patches, scores, imgs, tag):
             save_image(src, src_path)
 
             manifest.append({
-                "class": c, "rank": k, "side": tag,
+                "class_idx": c, 
+                "rank": k, 
+                "side": tag,
                 "score": float(scores[c, k]),
                 "source_iteration": int(imgs[c, k]),
                 "patch_path": patch_path,
@@ -873,6 +763,7 @@ def save_side(patches, scores, imgs, tag):
         save_image(grid, os.path.join(class_dir, f"{tag}_class{c:02d}_grid.png"))
     return manifest
 
+print(f">> {top_patches.shape=}")
 print("save tops")
 manifest  = save_side(top_patches,    top_patches_scores,    top_images, "top")
 print("save bottoms")
@@ -882,14 +773,6 @@ with open(os.path.join(out_dir, "manifest.json"), "w") as f:
     json.dump(manifest, f, indent=2)
 
 print(f"Saved {len(manifest)} patches + sources to {out_dir}/")
-
-
-
-
-
-
-
-
 
 # app/run/calc --------------------
 
@@ -913,7 +796,7 @@ for channel_idx in tqdm(range(nr_channels)):
     activations_for_channel_random_patches = []
 
     topk_idx = torch.topk(layer_activations_all[:,channel_idx], args.nr_images_per_channel, dim=0)[1]
-    topk_dataset = Subset(dataset, topk_idx)
+    topk_dataset = Subset(dataset_subset, topk_idx)
     topk_loader = torch.utils.data.DataLoader(
         topk_dataset,
         batch_size=args.batch_size, shuffle=False,
@@ -955,11 +838,12 @@ for channel_idx in tqdm(range(nr_channels)):
     std_activations_per_channel_top_patches.append(torch.tensor([activations_for_channel_top_patches.std()]))
     std_activations_per_channel_random_patches.append(torch.tensor([activations_for_channel_random_patches.std()]))
 
-    stat, p_value = ttest_ind(activations_for_channel_random_patches.flatten().detach().cpu().numpy(), activations_for_channel_bottom_patches.flatten().detach().cpu().numpy())
-    if p_value <= 0.05:
-        nr_channels_w_significant_change += 1
-    else:
-        nr_channels_wo_significant_change += 1
+    stat, p_value = ttest_ind(
+        activations_for_channel_random_patches.flatten().detach().cpu().numpy(), 
+        activations_for_channel_bottom_patches.flatten().detach().cpu().numpy())
+    
+    if p_value <= 0.05: nr_channels_w_significant_change += 1
+    else: nr_channels_wo_significant_change += 1
 
 # app/run/log --------------------
 
@@ -975,7 +859,7 @@ print('Number channels without significant change:', nr_channels_wo_significant_
 
 # app/more --------------------
 
-def validate_topk(model, dataloader, device, top_ks=[1, 3, 5]):
+def accuracy_on_topk(model, dataloader, top_ks=[1, 3, 5], device=DEVICE):
     # Initialize a dictionary to keep track of correct counts for each K
     correct_counts = {k: 0 for k in top_ks}
     total = 0
@@ -1025,7 +909,7 @@ normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                   std=[0.229, 0.224, 0.225])
 
 print("Dataset")
-dataset = datasets.ImageFolder(valdir, transforms.Compose([
+dataset_subset = datasets.ImageFolder(valdir, transforms.Compose([
             transforms.Resize(256),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
@@ -1034,22 +918,19 @@ dataset = datasets.ImageFolder(valdir, transforms.Compose([
 
 print("Load")
 loader = torch.utils.data.DataLoader(
-        dataset,
+        dataset_subset,
         batch_size=args.batch_size, 
         shuffle=False,      # critical to reproduce
         num_workers=4, 
         prefetch_factor=4,  # Prefetch batches in background
         pin_memory=True)
 
-# -----------------------------------------------
-
-REPEATS = 3
 acc_logs = []
 for sparsity in [0.3, 0.7, 0.6, 0.85, 0.90, 0.93, 0.95]:
     tmodel = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2).to(DEVICE)
     config = {'model': args.model, 'method': args.prune_method, 'sparsity':sparsity}
     prune_dispatch(tmodel, args.prune_method, sparsity=sparsity)
     print(config)
-    accs = validate_topk(tmodel, loader, DEVICE, top_ks=[1, 3, 5])
+    accs = accuracy_on_topk(tmodel, loader, top_ks=[1, 3, 5])
     acc_logs.append({**config , **accs})
     print(acc_logs[-1])
