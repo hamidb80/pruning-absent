@@ -28,7 +28,7 @@ L = 5
 # classes -------------------------
 
 # This model takes original model and outputs layer of interest
-class ModelWrapper(torch.nn.Module):
+class ModelWrapper(torch.nn.Module): #. model wrapper
     def __init__(self, model, layer_of_interest, architecture='CNN', hook_input=False):
         super(ModelWrapper, self).__init__()
 
@@ -42,16 +42,16 @@ class ModelWrapper(torch.nn.Module):
             # Usually the first tensor is the actual layer input
             if self.hook_input: self.activations["output"] = inputs[0].clone() # for in place clone
             else: self.activations["output"] = output
-     
+
         # Register the hook
         hook_handle = layer_of_interest.register_forward_hook(forward_hook)
 
         self.downsample = torch.nn.AdaptiveAvgPool2d((1, 1))
 
-    def forward(self, x):
-        _ = self.model(x)
+    def forward(self, x): #. custom forward pass
+        _ = self.model(x) #. pass input and throw away output
         if self.architecture == 'CNN':
-            x = self.downsample(self.activations["output"]).squeeze(-1).squeeze(-1)
+            x = self.downsample(self.activations["output"]).squeeze(-1).squeeze(-1) #. $\text{GAP}_{1,1}$(activations at `specified layer`) i.e. convert $\mathbb{R}^{N \times C \times H \times W}$ to $\mathbb{R}^{N \times C \times 1 \times 1}$
         elif self.architecture == 'TransformerMIN':
             x = torch.min(self.activations["output"], dim=1).values
         return x
@@ -726,20 +726,22 @@ mean_activations_per_channel_top_patches = []
 
 nr_channels = layer_activations_all.shape[1]
 
-for channel_idx in tqdm(range(nr_channels)):
+for channel_idx in tqdm(range(nr_channels)): #. iterate over channels
     print(f">> channel {channel_idx}")
     activations_for_channel_bottom_patches_list = []
     activations_for_channel_top_patches_list = []
 
     _, topk_idx = torch.topk(layer_activations_all[:,channel_idx], args.nr_images_per_channel, dim=0)
     topk_dataset = Subset(dataset_subset, topk_idx)
-    topk_loader = torch.utils.data.DataLoader( #. `loader` $\subseteq \mathbb{R}^{100 \times3 \times224 \times224}$
+    topk_loader = torch.utils.data.DataLoader( #. `loader` is all of activations for that channel  $\subseteq \mathbb{R}^{100 \times3 \times224 \times224}$
         topk_dataset,
         batch_size=args.batch_size, 
         shuffle=False,
         num_workers=0, 
         pin_memory=True)
 
+    print(f"{bottom_patches_for_channel.shape=}")
+    #. patches for this channel | $\mathbb{R}^{8 \times 3 \times 64 \times 64}$
     bottom_patches_for_channel = bottom_patches[channel_idx]
     top_patches_for_channel = top_patches[channel_idx]
 
@@ -759,7 +761,7 @@ for channel_idx in tqdm(range(nr_channels)):
             channel_activations_bottom_patches = activations_bottom_patches[:,channel_idx].detach().to(torch.float16).to(CPU)
             channel_activations_top_patches = activations_top_patches[:,channel_idx].detach().to(torch.float16).to(CPU)
 
-            #. 
+            #. wow
             activations_for_channel_bottom_patches_list.append(channel_activations_bottom_patches)
             activations_for_channel_top_patches_list.append(channel_activations_top_patches)
 
