@@ -653,6 +653,7 @@ dataset_full = datasets.ImageFolder(valdir, transforms.Compose([
             transforms.ToTensor(),
             normalize,
         ]))
+
 # run/dataset/split --------------------
 dataset_subset, _ = split_dataset_by_factor(dataset_full, args.data_ratio, args.seed)
 
@@ -740,8 +741,7 @@ for channel_idx in tqdm(range(nr_channels)): #. iterate over channels
         num_workers=0, 
         pin_memory=True)
 
-    print(f"{bottom_patches_for_channel.shape=}")
-    #. patches for this channel | $\mathbb{R}^{8 \times 3 \times 64 \times 64}$
+    #. patches for this channel | $\mathbb{R}^{\underbrace{8}_\text{nr patches} \times \underbrace{3}_\text{RGB} \times \underbrace{64 \times 64}_\square}$
     bottom_patches_for_channel = bottom_patches[channel_idx]
     top_patches_for_channel = top_patches[channel_idx]
 
