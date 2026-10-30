@@ -1,4 +1,6 @@
 temp/
+dist/
+
 play.*
 *.zip
 *.json
