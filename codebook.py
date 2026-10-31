@@ -872,7 +872,7 @@ df = pd.DataFrame(minmax_records)
 df.to_csv('./all-minmax.csv', index=False)
 
 cf = df[(df['least_class_count'] > 20) & (df['order'] <= 2)].sort_values('target_class_idx')
-cf.to_csv('confident-minmax.csv')
+cf.to_csv('./confident-minmax.csv')
 cf
 
 # hell ---------------------------
