@@ -855,15 +855,18 @@ for class_idx in range(N): #. `class_idx` $\subseteq \mathbb{R}^\text{output siz
 
     most_activating_labels_open, lest_activating_labels_open = labels[most_activating_idx], labels[least_activating_idx]
 
-    most_activating_labels, _ = topk_frequent(most_activating_labels_open, K, largest=True)
-    lest_activating_labels, _ = topk_frequent(lest_activating_labels_open, K, largest=False)
+    most_activating_labels, most_activating_counts = topk_frequent(most_activating_labels_open, K, largest=True)
+    lest_activating_labels, lest_activating_counts = topk_frequent(lest_activating_labels_open, K, largest=False)
     
-    for n, mst, lst in zip(range(1, N+1) , most_activating_labels, lest_activating_labels):
+    for n, mst, lst, mc, lc in zip(range(1, N+1) , most_activating_labels, lest_activating_labels, most_activating_counts, lest_activating_counts):
         minmax_records.append({
             'target_class_idx': class_idx, 
             'order': n,
-            'most_class_idx': mst.item(), 
-            'least_class_idx': lst.item()})
+            'most_class_idx': mst.item(),
+            'most_class_count': mc.item(),
+            'least_class_idx': lst.item(),
+            'least_class_count': lc.item(),
+        })
 
 df = pd.DataFrame(minmax_records)
 df.to_csv('./temp.csv', index=False)

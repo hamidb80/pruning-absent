@@ -4,4 +4,6 @@
 
 ---------
 
-used dataset: https://www.kaggle.com/datasets/sautkin/imagenet1kvalid
+## dataset
+- validation set: https://www.kaggle.com/datasets/sautkin/imagenet1kvalid
+- labels: https://github.com/MartinThoma/algorithms/blob/master/ML/ImageNet-classification/imagenet_class_index.json
