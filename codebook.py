@@ -15,6 +15,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torchvision.utils import save_image, make_grid
 
+import pandas as pd
 from scipy.stats import ttest_ind
 
 # constants -------------------------
@@ -577,12 +578,9 @@ def global_prune_specific_layers(model, sparsity, layer_types=None, pruning_meth
 # Pruning/dispatch --------------------
 
 def prune_dispatch(model, method, *args, **kwargs):
-    if   method == "global-unstructured-L1":
-        global_l1_unstructured_prune(model, *args, **kwargs)
-    elif method == "local-unstructured-L1":
-        local_l1_unstructured_prune(model, *args, **kwargs)
-    else:
-        assert False, f"prune method '{method}' is not deifned"
+    if   method == "global-unstructured-L1": global_l1_unstructured_prune(model, *args, **kwargs)
+    elif method == "local-unstructured-L1": local_l1_unstructured_prune(model, *args, **kwargs)
+    else: assert False, f"prune method '{method}' is not deifned"
 
 # config/args --------------------
 
@@ -613,7 +611,7 @@ args = parser.parse_args([
     '--seed', '0',
     '--sparsity', '0',
     '--prune_method', 'local-unstructured-L1',
-    '--data_ratio', '0.002',
+    '--data_ratio', '1',
 ])
 
 print("Arguments:")
@@ -626,13 +624,14 @@ if args.seed is not None:
     random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-### Model ###
-if   args.model == 'vgg19':    model = models.vgg19   (weights=models.   VGG19_Weights.IMAGENET1K_V1)
+if   args.model == 'vgg19': model = models.vgg19   (weights=models.   VGG19_Weights.IMAGENET1K_V1)
 elif args.model == 'resnet50': model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
 elif args.model == 'vit_b_16': model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
 else:
-    print('Model not implemented!')
-    assert False
+    quit(f'Model {args.model} not implemented!')
+
+print("========== Model Architecture =============")
+print(model)
 
 # run/model/prepare --------------------
 
@@ -670,8 +669,7 @@ loader = torch.utils.data.DataLoader(
 print(">>", args.prune_method, args.sparsity)
 prune_dispatch(model, args.prune_method, sparsity=args.sparsity)
 
-# run/act --------------------
-
+# run/collect top activations per channel on layer --------------------
 
 #. Get activations for each channel for each image
 layer_activations_all = [] 
@@ -718,60 +716,6 @@ nr_channels = layer_activations_all.shape[1]
 if   args.model in ['vgg19', 'resnet50']: bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images = get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="cnn", return_images=True)
 elif args.model == 'vit_b_16': bottom_patches, bottom_patches_scores, bottom_images, top_patches, top_patches_scores, top_images= get_lowest_highest_patches(loader_for_patches, intermediate_layer_model, nr_channels, args.patch_size, args.patch_stride, args.nr_patches, architecture="vit", return_images=True)
 
-# run/patches --------------------
-
-#. collect patches
-
-mean_activations_per_channel_bottom_patches = []
-mean_activations_per_channel_top_patches = []
-
-nr_channels = layer_activations_all.shape[1]
-
-for channel_idx in tqdm(range(nr_channels)): #. iterate over channels
-    print(f">> channel {channel_idx}")
-    activations_for_channel_bottom_patches_list = []
-    activations_for_channel_top_patches_list = []
-
-    _, topk_idx = torch.topk(layer_activations_all[:,channel_idx], args.nr_images_per_channel, dim=0)
-    topk_dataset = Subset(dataset_subset, topk_idx)
-    topk_loader = torch.utils.data.DataLoader( #. `loader` is all of activations for that channel  $\subseteq \mathbb{R}^{100 \times3 \times224 \times224}$
-        topk_dataset,
-        batch_size=args.batch_size, 
-        shuffle=False,
-        num_workers=0, 
-        pin_memory=True)
-
-    #. patches for this channel | $\mathbb{R}^{\underbrace{8}_\text{nr patches} \times \underbrace{3}_\text{RGB} \times \underbrace{64 \times 64}_\square}$
-    bottom_patches_for_channel = bottom_patches[channel_idx]
-    top_patches_for_channel = top_patches[channel_idx]
-
-    with torch.no_grad():
-        for images, labels in topk_loader: #. iterate loader | `images` $\subseteq \mathbb{R}^{100 \times \underbrace{3}_{\text{RGB}} \times \underbrace{\text{image height} \times \text{image width}}_{\square^2}}$ 
-            images = images.to(DEVICE)
-
-            #. _paste_ **top** & **bottom** patches on the image | $\subseteq \mathbb{R}^{100 \times \underbrace{3}_{\text{RGB}} \times \underbrace{\text{image height} \times \text{image width}}_{\square^2}}$ 
-            images_with_bottom_patches = paste_patches(images, bottom_patches_for_channel)
-            images_with_top_patches = paste_patches(images, top_patches_for_channel) 
-
-            #. pass modified images to the target layer  $\subseteq \mathbb{R}^{100 \times 2048}$ 
-            activations_bottom_patches = intermediate_layer_model(images_with_bottom_patches)
-            activations_top_patches = intermediate_layer_model(images_with_top_patches) 
-
-            #. get values for specific channel | $\subseteq \mathbb{R}^{100}$ 
-            channel_activations_bottom_patches = activations_bottom_patches[:,channel_idx].detach().to(torch.float16).to(CPU)
-            channel_activations_top_patches = activations_top_patches[:,channel_idx].detach().to(torch.float16).to(CPU)
-
-            #. wow
-            activations_for_channel_bottom_patches_list.append(channel_activations_bottom_patches)
-            activations_for_channel_top_patches_list.append(channel_activations_top_patches)
-
-    print(f">> rep")
-    activations_for_channel_bottom_patches = torch.cat(activations_for_channel_bottom_patches_list, dim=0) # $\mathbb{R}^{\text{no. patches}}$
-    activations_for_channel_top_patches = torch.cat(activations_for_channel_top_patches_list, dim=0)
-
-    mean_activations_per_channel_bottom_patches.append(torch.tensor([activations_for_channel_bottom_patches.mean()]))
-    mean_activations_per_channel_top_patches.append(torch.tensor([activations_for_channel_top_patches.mean()]))
-                
 # run/stats --------------------
 
 mean_activations_per_channel_bottom_patches = []
@@ -864,7 +808,111 @@ print('Activations for top images with random patches (std):', avg_std_act_per_c
 print('Number channels with significant change:', nr_channels_w_significant_change)
 print('Number channels without significant change:', nr_channels_wo_significant_change)
 
-# more --------------------
+# run/min-max classes/def ---------------------
+
+def topk_frequent(x, k, largest=True):
+    vals, counts = torch.unique(x, return_counts=True)   # vals ascending
+    k = min(k, vals.numel())
+    order = torch.argsort(counts, descending=largest, stable=True)[:k]
+    return vals[order], counts[order]
+
+@torch.no_grad()
+def eval_for_all( #. `eval_for_all`
+    dataloader: torch.utils.data.DataLoader,
+    model: torch.nn.Module,
+):
+    all_outs = []
+    all_lbls = []
+
+    for images, labels in tqdm(dataloader): #. iterate `images` $\subseteq \mathbb{R}^{B \times C \times H \times W}$ , `labels` $\subseteq \mathbb{R}^{B}$ 
+        images = images.to(DEVICE)
+        labels = labels.to(DEVICE)
+
+        outputs = model(images) #. `outputs` $\gets$ model(`patches`) $\subseteq \mathbb{R}^{\text{B} \times \text{output size}}$
+        
+        all_outs.append(outputs)
+        all_lbls.append(labels)
+
+    all_outs = torch.cat(all_outs, dim=0) #. outputs $\subseteq \mathbb{R}^{\text{samples} \times \text{output size}}$
+    all_lbls = torch.cat(all_lbls, dim=0) #. labels $\subseteq \mathbb{R}^{\text{samples}}$
+    
+    return all_outs, all_lbls
+
+# run/min-max classes/aggregate ---------------------
+
+outs, labels = eval_for_all(loader, model)
+
+# run/min-max classes/exec ---------------------
+
+minmax_records = []
+N = len(dataset_full.classes)
+K = args.nr_patches
+LIM = 100
+
+for class_idx in range(N): #. `class_idx` $\subseteq \mathbb{R}^\text{output size}$ 
+    _, most_activating_idx  = torch.topk(outs[:, class_idx], k=LIM, largest=True)
+    _, least_activating_idx = torch.topk(outs[:, class_idx], k=LIM, largest=False)
+
+    most_activating_labels_open, lest_activating_labels_open = labels[most_activating_idx], labels[least_activating_idx]
+
+    most_activating_labels, _ = topk_frequent(most_activating_labels_open, K, largest=True)
+    lest_activating_labels, _ = topk_frequent(lest_activating_labels_open, K, largest=False)
+    
+    for n, mst, lst in zip(range(1, N+1) , most_activating_labels, lest_activating_labels):
+        minmax_records.append({
+            'target_class_idx': class_idx, 
+            'order': n,
+            'most_class_idx': mst.item(), 
+            'least_class_idx': lst.item()})
+
+df = pd.DataFrame(minmax_records)
+df.to_csv('./temp.csv', index=False)
+df
+
+# hell ---------------------------
+
+layer_activations_all = [] 
+
+with torch.no_grad():
+    for images, labels in tqdm(loader):
+        images = images.to(DEVICE)
+        labels = labels.to(DEVICE)
+
+        output = model(images).detach().to(torch.float16).to(CPU)
+        layer_activations_all.append(output)
+
+layer_activations_all = torch.cat(layer_activations_all, dim=0) #. `layer_activations_all` $\subseteq \mathbb{R}^{\text{no. images} \times \text{no. channels}}$
+
+
+
+with torch.no_grad():
+    for images, labels in topk_loader: #. iterate loader | `images` $\subseteq \mathbb{R}^{100 \times \underbrace{3}_{\text{RGB}} \times \underbrace{\text{image height} \times \text{image width}}_{\square^2}}$ 
+        images = images.to(DEVICE)
+
+        #. _paste_ **top** & **bottom** patches on the image | $\subseteq \mathbb{R}^{100 \times \underbrace{3}_{\text{RGB}} \times \underbrace{\text{image height} \times \text{image width}}_{\square^2}}$ 
+        images_with_bottom_patches = paste_patches(images, bottom_patches_for_channel)
+        images_with_top_patches = paste_patches(images, top_patches_for_channel) 
+
+        #. pass modified images to the target layer and then _GAP_ over each channel  $\subseteq \mathbb{R}^{100 \times 2048}$ 
+        activations_bottom_patches = model(images_with_bottom_patches)
+        activations_top_patches = model(images_with_top_patches) 
+
+        #. get values for specific channel | $\subseteq \mathbb{R}^{100}$ 
+        channel_activations_bottom_patches = activations_bottom_patches[:,channel_idx].detach().to(torch.float16).to(CPU)
+        channel_activations_top_patches = activations_top_patches[:,channel_idx].detach().to(torch.float16).to(CPU)
+
+        topk_vals,    topk_idx    = torch.topk(channel_activations_top_patches,    k=args.nr_patches, largest=True)
+        bottomk_vals, bottomk_idx = torch.topk(channel_activations_bottom_patches, k=args.nr_patches, largest=False)
+
+print(f">> rep")
+activations_for_channel_bottom_patches = torch.cat(activations_for_channel_bottom_patches_list, dim=0) #. $\mathbb{R}^{\underbrace{100}_\text{nr images per channel}}$
+activations_for_channel_top_patches = torch.cat(activations_for_channel_top_patches_list, dim=0)
+print(f"{activations_for_channel_bottom_patches.shape=}")
+
+mean_activations_per_channel_bottom_patches.append(torch.tensor([activations_for_channel_bottom_patches.mean()]))
+mean_activations_per_channel_top_patches.append(torch.tensor([activations_for_channel_top_patches.mean()]))
+                
+# run/table 1 --------------------
 
 def accuracy_on_topk(model, dataloader, top_ks=[1, 3, 5], device=DEVICE):
     # Initialize a dictionary to keep track of correct counts for each K
