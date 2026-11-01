@@ -25,6 +25,13 @@ DEVICE = torch.device(CUDA if torch.cuda.is_available() else CPU)
 
 L = 5
 
+# config -------------------------
+
+def set_seed(seed):
+    if seed is not None:
+        random.seed(seed)
+        torch.manual_seed(seed)
+
 # classes -------------------------
 
 # This model takes original model and outputs layer of interest
@@ -600,7 +607,7 @@ parser.add_argument('--prune_method', default=None, type=str, help='pruning meth
 # run/args --------------------
 
 args = parser.parse_args([
-    # '--data_dir', 'D:/sautkin.imagenet1kvalid/',
+    '--data_dir', 'D:/sautkin.imagenet1kvalid/',
     '--model', 'resnet50',
     '--model_layer', 'model.layer4[2].conv3',
     '--batch_size', '256',
@@ -619,15 +626,17 @@ for key, value in vars(args).items():
 
 # run/prepare --------------------
 
-if args.seed is not None:
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
+def load_model(key):
+    if   key == 'vgg19': model = models.vgg19   (weights=models.   VGG19_Weights.IMAGENET1K_V1)
+    elif key == 'resnet50': model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+    elif key == 'vit_b_16': model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
+    else: assert False, f'Model {args.model} not implemented!'
+    
+    return model.to(DEVICE)
 
-if   args.model == 'vgg19': model = models.vgg19   (weights=models.   VGG19_Weights.IMAGENET1K_V1)
-elif args.model == 'resnet50': model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
-elif args.model == 'vit_b_16': model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
-else:
-    quit(f'Model {args.model} not implemented!')
+
+set_seed(args.seed)
+model = load_model(args.model)
 
 print("========== Model Architecture =============")
 print(model)
@@ -690,42 +699,50 @@ def eval_for_all( #. `eval_for_all`
     
     return all_outs, all_lbls
 
-# run/min-max classes/aggregate ---------------------
+def extract_negative_similarity(
+    model,
+    val_loader,
+    N = len(dataset_full.classes),
+    K = args.nr_patches,
+    LIM = 100,
+):
+    outs, labels = eval_for_all(val_loader, model)
+    minmax_records = []
 
-outs, labels = eval_for_all(loader, model)
+    for class_idx in range(N): #. `class_idx` $\subseteq \mathbb{R}^\text{output size}$ 
+        _, most_activating_idx  = torch.topk(outs[:, class_idx], k=LIM, largest=True)
+        _, least_activating_idx = torch.topk(outs[:, class_idx], k=LIM, largest=False)
 
-# run/min-max classes/exec ---------------------
+        most_activating_labels_open, lest_activating_labels_open = labels[most_activating_idx], labels[least_activating_idx]
 
-minmax_records = []
-N = len(dataset_full.classes)
-K = args.nr_patches
-LIM = 100
+        most_activating_labels, most_activating_counts = topk_frequent(most_activating_labels_open, K, largest=True)
+        lest_activating_labels, lest_activating_counts = topk_frequent(lest_activating_labels_open, K, largest=False)
+        
+        for n, mst, lst, mc, lc in zip(range(1, N+1) , most_activating_labels, lest_activating_labels, most_activating_counts, lest_activating_counts):
+            minmax_records.append({
+                'target_class_idx': class_idx, 
+                'order': n,
+                'most_class_idx': mst.item(),
+                'most_class_count': mc.item(),
+                'least_class_idx': lst.item(),
+                'least_class_count': lc.item(),
+            })
 
-for class_idx in range(N): #. `class_idx` $\subseteq \mathbb{R}^\text{output size}$ 
-    _, most_activating_idx  = torch.topk(outs[:, class_idx], k=LIM, largest=True)
-    _, least_activating_idx = torch.topk(outs[:, class_idx], k=LIM, largest=False)
+    return pd.DataFrame(minmax_records)
 
-    most_activating_labels_open, lest_activating_labels_open = labels[most_activating_idx], labels[least_activating_idx]
+# run/model/eval --------------------
 
-    most_activating_labels, most_activating_counts = topk_frequent(most_activating_labels_open, K, largest=True)
-    lest_activating_labels, lest_activating_counts = topk_frequent(lest_activating_labels_open, K, largest=False)
-    
-    for n, mst, lst, mc, lc in zip(range(1, N+1) , most_activating_labels, lest_activating_labels, most_activating_counts, lest_activating_counts):
-        minmax_records.append({
-            'target_class_idx': class_idx, 
-            'order': n,
-            'most_class_idx': mst.item(),
-            'most_class_count': mc.item(),
-            'least_class_idx': lst.item(),
-            'least_class_count': lc.item(),
-        })
+for pruning in ["global-unstructured-L1", "local-unstructured-L1"]:
+    for sparsity in [0.1,0.2,0.3,0.4,0.5,0.6,0.7]:
+        print(f"{pruning=}, {sparsity=}")
+        model = load_model('resnet50')
+        prune_dispatch(model, pruning, sparsity=sparsity)
 
-df = pd.DataFrame(minmax_records)
-df.to_csv('./all-minmax.csv', index=False)
+        df = extract_negative_similarity(model, loader)
+        cf = df[(df['least_class_count'] > 20) & (df['order'] <= 3)].sort_values('target_class_idx')
 
-cf = df[(df['least_class_count'] > 20) & (df['order'] <= 3)].sort_values('target_class_idx')
-cf.to_csv('./confident-minmax.csv')
-cf
+        df.to_csv(f'./all-minmax-{pruning}-{sparsity}.csv', index=False)
+        cf.to_csv(f'./confident-minmax-{pruning}-{sparsity}.csv')
 
 # run/model/cond --------------------
 
