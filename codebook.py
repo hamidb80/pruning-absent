@@ -13,7 +13,6 @@ from torch.utils.data import Subset
 import torchvision.models as models
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
-from torchvision.utils import save_image, make_grid
 
 import pandas as pd
 from scipy.stats import ttest_ind
@@ -633,14 +632,6 @@ else:
 print("========== Model Architecture =============")
 print(model)
 
-# run/model/prepare --------------------
-
-# remove inplace operations
-ReLU_inplace_to_False(model)
-intermediate_layer_model = ModelWrapper(model, eval(args.model_layer))
-intermediate_layer_model.eval()
-intermediate_layer_model.to(DEVICE)
-
 # run/dataset/load --------------------
 
 print("dataset")
@@ -668,6 +659,85 @@ loader = torch.utils.data.DataLoader(
 # run/prune --------------------
 print(">>", args.prune_method, args.sparsity)
 prune_dispatch(model, args.prune_method, sparsity=args.sparsity)
+
+# run/min-max classes/def ---------------------
+
+def topk_frequent(x, k, largest=True):
+    vals, counts = torch.unique(x, return_counts=True)   # vals ascending
+    k = min(k, vals.numel())
+    order = torch.argsort(counts, descending=largest, stable=True)[:k]
+    return vals[order], counts[order]
+
+@torch.no_grad()
+def eval_for_all( #. `eval_for_all`
+    dataloader: torch.utils.data.DataLoader,
+    model: torch.nn.Module,
+):
+    all_outs = []
+    all_lbls = []
+
+    for images, labels in tqdm(dataloader): #. iterate `images` $\subseteq \mathbb{R}^{B \times C \times H \times W}$ , `labels` $\subseteq \mathbb{R}^{B}$ 
+        images = images.to(DEVICE)
+        labels = labels.to(DEVICE)
+
+        outputs = model(images) #. `outputs` $\gets$ model(`patches`) $\subseteq \mathbb{R}^{\text{B} \times \text{output size}}$
+        
+        all_outs.append(outputs)
+        all_lbls.append(labels)
+
+    all_outs = torch.cat(all_outs, dim=0) #. outputs $\subseteq \mathbb{R}^{\text{samples} \times \text{output size}}$
+    all_lbls = torch.cat(all_lbls, dim=0) #. labels $\subseteq \mathbb{R}^{\text{samples}}$
+    
+    return all_outs, all_lbls
+
+# run/min-max classes/aggregate ---------------------
+
+outs, labels = eval_for_all(loader, model)
+
+# run/min-max classes/exec ---------------------
+
+minmax_records = []
+N = len(dataset_full.classes)
+K = args.nr_patches
+LIM = 100
+
+for class_idx in range(N): #. `class_idx` $\subseteq \mathbb{R}^\text{output size}$ 
+    _, most_activating_idx  = torch.topk(outs[:, class_idx], k=LIM, largest=True)
+    _, least_activating_idx = torch.topk(outs[:, class_idx], k=LIM, largest=False)
+
+    most_activating_labels_open, lest_activating_labels_open = labels[most_activating_idx], labels[least_activating_idx]
+
+    most_activating_labels, most_activating_counts = topk_frequent(most_activating_labels_open, K, largest=True)
+    lest_activating_labels, lest_activating_counts = topk_frequent(lest_activating_labels_open, K, largest=False)
+    
+    for n, mst, lst, mc, lc in zip(range(1, N+1) , most_activating_labels, lest_activating_labels, most_activating_counts, lest_activating_counts):
+        minmax_records.append({
+            'target_class_idx': class_idx, 
+            'order': n,
+            'most_class_idx': mst.item(),
+            'most_class_count': mc.item(),
+            'least_class_idx': lst.item(),
+            'least_class_count': lc.item(),
+        })
+
+df = pd.DataFrame(minmax_records)
+df.to_csv('./all-minmax.csv', index=False)
+
+cf = df[(df['least_class_count'] > 20) & (df['order'] <= 3)].sort_values('target_class_idx')
+cf.to_csv('./confident-minmax.csv')
+cf
+
+# run/model/cond --------------------
+
+exit(1)
+
+# run/model/prepare --------------------
+
+# remove inplace operations
+ReLU_inplace_to_False(model)
+intermediate_layer_model = ModelWrapper(model, eval(args.model_layer))
+intermediate_layer_model.eval()
+intermediate_layer_model.to(DEVICE)
 
 # run/collect top activations per channel on layer --------------------
 
@@ -807,73 +877,6 @@ print('Activations for top images with random patches (std):', avg_std_act_per_c
 
 print('Number channels with significant change:', nr_channels_w_significant_change)
 print('Number channels without significant change:', nr_channels_wo_significant_change)
-
-# run/min-max classes/def ---------------------
-
-def topk_frequent(x, k, largest=True):
-    vals, counts = torch.unique(x, return_counts=True)   # vals ascending
-    k = min(k, vals.numel())
-    order = torch.argsort(counts, descending=largest, stable=True)[:k]
-    return vals[order], counts[order]
-
-@torch.no_grad()
-def eval_for_all( #. `eval_for_all`
-    dataloader: torch.utils.data.DataLoader,
-    model: torch.nn.Module,
-):
-    all_outs = []
-    all_lbls = []
-
-    for images, labels in tqdm(dataloader): #. iterate `images` $\subseteq \mathbb{R}^{B \times C \times H \times W}$ , `labels` $\subseteq \mathbb{R}^{B}$ 
-        images = images.to(DEVICE)
-        labels = labels.to(DEVICE)
-
-        outputs = model(images) #. `outputs` $\gets$ model(`patches`) $\subseteq \mathbb{R}^{\text{B} \times \text{output size}}$
-        
-        all_outs.append(outputs)
-        all_lbls.append(labels)
-
-    all_outs = torch.cat(all_outs, dim=0) #. outputs $\subseteq \mathbb{R}^{\text{samples} \times \text{output size}}$
-    all_lbls = torch.cat(all_lbls, dim=0) #. labels $\subseteq \mathbb{R}^{\text{samples}}$
-    
-    return all_outs, all_lbls
-
-# run/min-max classes/aggregate ---------------------
-
-outs, labels = eval_for_all(loader, model)
-
-# run/min-max classes/exec ---------------------
-
-minmax_records = []
-N = len(dataset_full.classes)
-K = args.nr_patches
-LIM = 100
-
-for class_idx in range(N): #. `class_idx` $\subseteq \mathbb{R}^\text{output size}$ 
-    _, most_activating_idx  = torch.topk(outs[:, class_idx], k=LIM, largest=True)
-    _, least_activating_idx = torch.topk(outs[:, class_idx], k=LIM, largest=False)
-
-    most_activating_labels_open, lest_activating_labels_open = labels[most_activating_idx], labels[least_activating_idx]
-
-    most_activating_labels, most_activating_counts = topk_frequent(most_activating_labels_open, K, largest=True)
-    lest_activating_labels, lest_activating_counts = topk_frequent(lest_activating_labels_open, K, largest=False)
-    
-    for n, mst, lst, mc, lc in zip(range(1, N+1) , most_activating_labels, lest_activating_labels, most_activating_counts, lest_activating_counts):
-        minmax_records.append({
-            'target_class_idx': class_idx, 
-            'order': n,
-            'most_class_idx': mst.item(),
-            'most_class_count': mc.item(),
-            'least_class_idx': lst.item(),
-            'least_class_count': lc.item(),
-        })
-
-df = pd.DataFrame(minmax_records)
-df.to_csv('./all-minmax.csv', index=False)
-
-cf = df[(df['least_class_count'] > 20) & (df['order'] <= 2)].sort_values('target_class_idx')
-cf.to_csv('./confident-minmax.csv')
-cf
 
 # hell ---------------------------
 
