@@ -716,7 +716,7 @@ def extract_negative_similarity(
         most_activating_labels_open, lest_activating_labels_open = labels[most_activating_idx], labels[least_activating_idx]
 
         most_activating_labels, most_activating_counts = topk_frequent(most_activating_labels_open, K, largest=True)
-        lest_activating_labels, lest_activating_counts = topk_frequent(lest_activating_labels_open, K, largest=False)
+        lest_activating_labels, lest_activating_counts = topk_frequent(lest_activating_labels_open, K, largest=True)
         
         for n, mst, lst, mc, lc in zip(range(1, N+1) , most_activating_labels, lest_activating_labels, most_activating_counts, lest_activating_counts):
             minmax_records.append({
@@ -728,7 +728,8 @@ def extract_negative_similarity(
                 'least_class_count': lc.item(),
             })
 
-    return pd.DataFrame(minmax_records)
+    df = pd.DataFrame(minmax_records)
+    return df
 
 # run/model/eval --------------------
 
