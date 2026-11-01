@@ -600,7 +600,7 @@ parser.add_argument('--prune_method', default=None, type=str, help='pruning meth
 # run/args --------------------
 
 args = parser.parse_args([
-    '--data_dir', 'D:/sautkin.imagenet1kvalid/',
+    # '--data_dir', 'D:/sautkin.imagenet1kvalid/',
     '--model', 'resnet50',
     '--model_layer', 'model.layer4[2].conv3',
     '--batch_size', '256',
@@ -609,7 +609,7 @@ args = parser.parse_args([
     '--nr_patches', '8',
     '--seed', '0',
     '--sparsity', '0',
-    '--prune_method', 'local-unstructured-L1',
+    '--prune_method', 'global-unstructured-L1',
     '--data_ratio', '1',
 ])
 
