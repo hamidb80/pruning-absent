@@ -737,6 +737,7 @@ for pruning in ["global-unstructured-L1", "local-unstructured-L1"]:
     for sparsity in [0.1,0.2,0.3,0.4,0.5,0.6,0.7]:
         print(f"{pruning=}, {sparsity=}")
         model = load_model('resnet50')
+        model.eval()
         prune_dispatch(model, pruning, sparsity=sparsity)
 
         df = extract_negative_similarity(model, loader)
@@ -1016,3 +1017,17 @@ for sparsity in [0.3, 0.7, 0.6, 0.85, 0.90, 0.93, 0.95]:
     accs = accuracy_on_topk(tmodel, loader, top_ks=[1, 3, 5])
     acc_logs.append({**config , **accs})
     print(acc_logs[-1])
+
+# download/csv ------------------------
+
+import zipfile, glob, os
+
+csv_files = glob.glob('/kaggle/working/**/*.csv', recursive=True)  # includes subfolders
+# or just top-level: glob.glob('/kaggle/working/*.csv')
+
+with zipfile.ZipFile('/kaggle/working/csv_outputs.zip', 'w', zipfile.ZIP_DEFLATED) as zf:
+    for f in csv_files:
+        # arcname keeps relative path structure inside the zip
+        zf.write(f, arcname=os.path.relpath(f, '/kaggle/working'))
+
+print(f"Zipped {len(csv_files)} csv files")
