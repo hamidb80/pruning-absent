@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 import torch
 from torch.utils.data import random_split, Subset
+import torch.nn.functional as F
 import torch.nn.utils.prune     as prune
 from torch.utils.data import Subset
 
@@ -16,6 +17,7 @@ import torchvision.datasets as datasets
 
 import pandas as pd
 from scipy.stats import ttest_ind
+
 
 # constants -------------------------
 
@@ -682,22 +684,22 @@ def eval_for_all( #. `eval_for_all`
     dataloader: torch.utils.data.DataLoader,
     model: torch.nn.Module,
 ):
-    all_outs = []
-    all_lbls = []
+    logits = []
+    labels = []
 
-    for images, labels in tqdm(dataloader): #. iterate `images` $\subseteq \mathbb{R}^{B \times C \times H \times W}$ , `labels` $\subseteq \mathbb{R}^{B}$ 
-        images = images.to(DEVICE)
-        labels = labels.to(DEVICE)
+    for batch_images, batch_labels in tqdm(dataloader): #. iterate `images` $\subseteq \mathbb{R}^{B \times C \times H \times W}$ , `labels` $\subseteq \mathbb{R}^{B}$ 
+        batch_images = batch_images.to(DEVICE)
+        batch_labels = batch_labels.to(DEVICE)
 
-        outputs = model(images) #. `outputs` $\gets$ model(`patches`) $\subseteq \mathbb{R}^{\text{B} \times \text{output size}}$
-        
-        all_outs.append(outputs)
-        all_lbls.append(labels)
+        batch_logits = model(batch_images) #. `outputs` $\gets$ model(`patches`) $\subseteq \mathbb{R}^{\text{B} \times \text{output size}}$
 
-    all_outs = torch.cat(all_outs, dim=0) #. outputs $\subseteq \mathbb{R}^{\text{samples} \times \text{output size}}$
-    all_lbls = torch.cat(all_lbls, dim=0) #. labels $\subseteq \mathbb{R}^{\text{samples}}$
+        logits.append(batch_logits)
+        labels.append(batch_labels)
+
+    logits = torch.cat(logits, dim=0) #. outputs $\subseteq \mathbb{R}^{\text{samples} \times \text{output size}}$
+    labels = torch.cat(batch_labels, dim=0) #. labels $\subseteq \mathbb{R}^{\text{samples}}$
     
-    return all_outs, all_lbls
+    return F.normalize(logits, p=2, dim=1), labels
 
 def extract_negative_similarity(
     model,
@@ -706,12 +708,12 @@ def extract_negative_similarity(
     K = args.nr_patches,
     LIM = 100,
 ):
-    outs, labels = eval_for_all(val_loader, model)
+    logits, labels = eval_for_all(val_loader, model)
     minmax_records = []
 
     for class_idx in range(N): #. `class_idx` $\subseteq \mathbb{R}^\text{output size}$ 
-        _, most_activating_idx  = torch.topk(outs[:, class_idx], k=LIM, largest=True)
-        _, least_activating_idx = torch.topk(outs[:, class_idx], k=LIM, largest=False)
+        _, most_activating_idx  = torch.topk(logits[:, class_idx], k=LIM, largest=True)
+        _, least_activating_idx = torch.topk(logits[:, class_idx], k=LIM, largest=False)
 
         most_activating_labels_open, lest_activating_labels_open = labels[most_activating_idx], labels[least_activating_idx]
 
