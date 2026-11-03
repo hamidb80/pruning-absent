@@ -699,7 +699,7 @@ def eval_for_all( #. `eval_for_all`
     logits = torch.cat(logits, dim=0) #. outputs $\subseteq \mathbb{R}^{\text{samples} \times \text{output size}}$
     labels = torch.cat(batch_labels, dim=0) #. labels $\subseteq \mathbb{R}^{\text{samples}}$
     
-    return F.normalize(logits, p=2, dim=1), labels
+    return logits, labels
 
 def extract_negative_similarity(
     model,
