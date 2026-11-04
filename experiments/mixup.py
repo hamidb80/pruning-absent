@@ -1,6 +1,8 @@
 import os
 
 import numpy as np
+import pandas as pd
+
 import torch
 from torchvision import datasets, transforms, models
 from torchvision.utils import save_image  # <-- add
@@ -12,7 +14,7 @@ DEVICE = torch.device(CUDA if torch.cuda.is_available() else CPU)
 
 data_dir    = 'D:/sautkin.imagenet1kvalid/'
 num_alphas  = 11
-num_pairs   = 5
+num_pairs   = 50
 pair_seed   = 0
 model_name  = "resnet50"
 data_ratio  = 1.0
@@ -50,7 +52,8 @@ def hcat_strip(t):
     return torch.cat([t[i] for i in range(t.shape[0])], dim=2)
 
 # model ----------
-model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
+# model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
+model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
 model = model.eval().to(DEVICE)
 
 # collect all indices per class ----------
@@ -105,7 +108,9 @@ for pair_id, (ia, ib) in enumerate(pairs):
     with torch.no_grad():
         mixed_logits = model(mixed_batch)
 
-    print("mixed", focus_logits(mixed_logits))
+    print(f"{torch.from_numpy(alphas).unsqueeze(1).shape=} {focus_logits(mixed_logits).shape=}", )
+    print("mixed")
+    print(pd.DataFrame(torch.cat([torch.from_numpy(alphas).unsqueeze(1), focus_logits(mixed_logits)], dim=1), columns=['alpha', lbl_a, lbl_b]))
 
     # ---- horizontal strip (concat) ----
     # only alpha=0 (A) and alpha=1 (B)
@@ -119,4 +124,5 @@ for pair_id, (ia, ib) in enumerate(pairs):
     with torch.no_grad():
         strip_logits = model(strip)
     
-    print("strip", focus_logits(strip_logits))
+    print("strip")
+    print(focus_logits(strip_logits))

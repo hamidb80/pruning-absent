@@ -697,7 +697,7 @@ def eval_for_all( #. `eval_for_all`
         labels.append(batch_labels)
 
     logits = torch.cat(logits, dim=0) #. outputs $\subseteq \mathbb{R}^{\text{samples} \times \text{output size}}$
-    labels = torch.cat(batch_labels, dim=0) #. labels $\subseteq \mathbb{R}^{\text{samples}}$
+    labels = torch.cat(labels, dim=0) #. labels $\subseteq \mathbb{R}^{\text{samples}}$
     
     return logits, labels
 
