@@ -56,8 +56,8 @@ model = models.vit_b_16(weights=models.ViT_B_16_Weights.IMAGENET1K_V1)
 model = model.eval().to(DEVICE)
 
 # collect all indices per class ----------
-class_a     = "00104"
-class_b     = "00190"
+class_a     = "00120"
+class_b     = "00314"
 class_names = dataset.classes
 
 if class_a not in class_names: raise ValueError(f"'{class_a}' not in classes: {class_names}")
