@@ -1,0 +1,24 @@
+{'model': 'vit_b_16', 'method': 'none', 'sparsity': 0, 1: 0.80548, 3: 0.92654, 5: 0.95134}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.1, 1: 0.80312, 3: 0.92632, 5: 0.9511}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.2, 1: 0.79052, 3: 0.91786, 5: 0.94546}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.3, 1: 0.71742, 3: 0.86542, 5: 0.90288}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.4, 1: 0.55204, 3: 0.71978, 5: 0.77726}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.5, 1: 0.28448, 3: 0.42746, 5: 0.49224}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.6, 1: 0.0959, 3: 0.17266, 5: 0.21454}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.7, 1: 0.01068, 3: 0.0237, 5: 0.03458}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.85, 1: 0.00108, 3: 0.0031, 5: 0.00528}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.9, 1: 0.001, 3: 0.00294, 5: 0.00546}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.93, 1: 0.00102, 3: 0.00314, 5: 0.0057}
+{'model': 'vit_b_16', 'method': 'global-unstructured-L1', 'sparsity': 0.95, 1: 0.00106, 3: 0.00288, 5: 0.00516}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.1, 1: 0.80472, 3: 0.92642, 5: 0.95068}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.2, 1: 0.79648, 3: 0.92064, 5: 0.94646}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.3, 1: 0.7682, 3: 0.9012, 5: 0.93318}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.4, 1: 0.61328, 3: 0.79458, 5: 0.84464}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.5, 1: 0.0669, 3: 0.12508, 5: 0.1588}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.6, 1: 0.00236, 3: 0.00674, 5: 0.01054}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.7, 1: 0.00102, 3: 0.0031, 5: 0.0051}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.85, 1: 0.001, 3: 0.003, 5: 0.00506}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.9, 1: 0.001, 3: 0.0029, 5: 0.00502}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.93, 1: 0.001, 3: 0.003, 5: 0.00558}
+{'model': 'vit_b_16', 'method': 'local-unstructured-L1', 'sparsity': 0.95, 1: 0.001, 3: 0.003, 5: 0.005}
+
