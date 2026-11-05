@@ -13,7 +13,6 @@ CUDA = 'cuda'
 DEVICE = torch.device(CUDA if torch.cuda.is_available() else CPU)
 
 data_dir    = 'D:/sautkin.imagenet1kvalid/'
-num_alphas  = 11
 num_pairs   = 50
 pair_seed   = 0
 model_name  = "resnet50"
@@ -88,7 +87,7 @@ if save_strips:
     os.makedirs(out_dir, exist_ok=True)
 
 # loop over pairs ----------
-alphas = np.linspace(0.0, 1.0, num_alphas)
+alphas = np.linspace(0.0, 1.0, 11)
 
 for pair_id, (ia, ib) in enumerate(pairs):
     img_a, lbl_a = dataset[ia]
@@ -110,19 +109,20 @@ for pair_id, (ia, ib) in enumerate(pairs):
 
     print(f"{torch.from_numpy(alphas).unsqueeze(1).shape=} {focus_logits(mixed_logits).shape=}", )
     print("mixed")
-    print(pd.DataFrame(torch.cat([torch.from_numpy(alphas).unsqueeze(1), focus_logits(mixed_logits)], dim=1), columns=['alpha', lbl_a, lbl_b]))
+    print(alphas)
+    df_mixup = pd.DataFrame(torch.cat([torch.from_numpy(alphas).unsqueeze(1), focus_logits(mixed_logits)], dim=1), columns=['alpha', lbl_a, lbl_b])
+    print(df_mixup)
 
     # ---- horizontal strip (concat) ----
-    # only alpha=0 (A) and alpha=1 (B)
     
-    strip = hcat_strip(unnormalize(mixed_batch[[0, -1]].cpu())).unsqueeze(0)  # [3, 224, 2*224]
+    # strip = hcat_strip(unnormalize(mixed_batch[[0, -1]].cpu())).unsqueeze(0)  # [3, 224, 2*224]
 
-    if save_strips:
-        save_image(strip, f"{out_dir}/pair{pair_id:02d}_{class_a}_{class_b}.png")
-        print(f"  saved strip -> {out_dir}/pair{pair_id:02d}_{class_a}_{class_b}.png")
+    # if save_strips:
+    #     save_image(strip, f"{out_dir}/pair{pair_id:02d}_{class_a}_{class_b}.png")
+    #     print(f"  saved strip -> {out_dir}/pair{pair_id:02d}_{class_a}_{class_b}.png")
 
-    with torch.no_grad():
-        strip_logits = model(strip)
+    # with torch.no_grad():
+    #     strip_logits = model(strip)
     
-    print("strip")
-    print(focus_logits(strip_logits))
+    # print("strip")
+    # print(focus_logits(strip_logits))
